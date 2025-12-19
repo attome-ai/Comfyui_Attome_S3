@@ -282,9 +282,9 @@ class AttomeS3LoadImage:
     def load_image(self, s3_config, s3_key):
         # Skip S3 loading if s3_key is empty - return empty image
         if not validate_s3_key(s3_key):
-            # Return a 1x1 black image and mask
-            empty_image = torch.zeros((1, 1, 1, 3), dtype=torch.float32)
-            empty_mask = torch.zeros((1, 1, 1), dtype=torch.float32)
+            # Return a 512x512 black image and mask (proper size to avoid division errors)
+            empty_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+            empty_mask = torch.zeros((1, 512, 512), dtype=torch.float32)
             return (empty_image, empty_mask)
         
         data = download_from_s3(s3_config, s3_key)
@@ -417,8 +417,8 @@ class AttomeS3LoadAudio:
         if not validate_s3_key(s3_key):
             try:
                 import torchaudio
-                # Return empty waveform (1 channel, 1 sample)
-                empty_waveform = torch.zeros((1, 1, 1), dtype=torch.float32)
+                # Return empty waveform (1 channel, 1024 samples - proper size to avoid processing errors)
+                empty_waveform = torch.zeros((1, 1, 1024), dtype=torch.float32)
                 return ({"waveform": empty_waveform, "sample_rate": 44100},)
             except ImportError:
                 return ({"waveform": b"", "sample_rate": 44100, "raw": True},)
@@ -570,8 +570,8 @@ class AttomeS3LoadVideo:
                    frame_count=0, skip_frames=0):
         # Skip S3 loading if s3_key is empty - return empty video
         if not validate_s3_key(s3_key):
-            # Return a single 1x1 black frame
-            empty_frames = torch.zeros((1, 1, 1, 3), dtype=torch.float32)
+            # Return a single 512x512 black frame (proper size to avoid division errors)
+            empty_frames = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
             return (empty_frames, 0, 24.0)
         
         data = download_from_s3(s3_config, s3_key)
