@@ -260,7 +260,8 @@ class AttomeS3SaveText:
                 "save_metadata": ("BOOLEAN", {
                     "default": True,
                 }),
-            }
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING",)
@@ -385,7 +386,8 @@ class AttomeS3SaveImage:
                 "save_metadata": ("BOOLEAN", {
                     "default": True,
                 }),
-            }
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING",)
@@ -415,19 +417,37 @@ class AttomeS3SaveImage:
         buffer = io.BytesIO()
         save_kwargs = {}
 
-        # Handle metadata for PNG format
-        if format == "PNG" and save_metadata:
-            from PIL import PngImagePlugin
-            metadata = PngImagePlugin.PngInfo()
+        # Handle metadata for PNG and WEBP formats
+        if save_metadata and (prompt is not None or extra_pnginfo is not None):
+            import json
             
-            # Add ComfyUI workflow metadata if available
-            if prompt is not None:
-                metadata.add_text("prompt", str(prompt))
-            if extra_pnginfo is not None:
-                for key, value in extra_pnginfo.items():
-                    metadata.add_text(key, str(value))
+            if format == "PNG":
+                from PIL import PngImagePlugin
+                metadata = PngImagePlugin.PngInfo()
+                
+                # Add ComfyUI workflow metadata if available
+                # ComfyUI expects JSON-encoded strings for "prompt" and "workflow" keys
+                if prompt is not None:
+                    metadata.add_text("prompt", json.dumps(prompt))
+                if extra_pnginfo is not None:
+                    for key, value in extra_pnginfo.items():
+                        metadata.add_text(key, json.dumps(value))
+                
+                save_kwargs["pnginfo"] = metadata
             
-            save_kwargs["pnginfo"] = metadata
+            elif format in ["WEBP", "JPEG"]:
+                # WEBP/JPEG uses EXIF for metadata (matching ComfyUI's implementation)
+                # Format: EXIF tag with "key:json_value" format
+                metadata = img.getexif()
+                if prompt is not None:
+                    metadata[0x0110] = "prompt:{}".format(json.dumps(prompt))
+                if extra_pnginfo is not None:
+                    initial_exif = 0x010f
+                    for x in extra_pnginfo:
+                        metadata[initial_exif] = "{}:{}".format(x, json.dumps(extra_pnginfo[x]))
+                        initial_exif -= 1
+                
+                save_kwargs["exif"] = metadata
         
         if format == "JPEG":
             img = img.convert("RGB")  # JPEG doesn't support alpha
@@ -541,7 +561,8 @@ class AttomeS3SaveAudio:
                 "save_metadata": ("BOOLEAN", {
                     "default": True,
                 }),
-            }
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING",)
@@ -588,22 +609,51 @@ class AttomeS3SaveAudio:
                 if save_metadata and (prompt is not None or extra_pnginfo is not None):
                     try:
                         import json
-                        if format in ["mp3", "flac"]:
-                            from mutagen.easyid3 import EasyID3
-                            from mutagen.mp3 import MP3
-                            from mutagen.flac import FLAC
-                            
-                            if format == "mp3":
-                                audio_file = MP3(tmp_path, ID3=EasyID3)
-                            else:
-                                audio_file = FLAC(tmp_path)
-                            
-                            if prompt is not None:
-                                audio_file["comment"] = json.dumps(prompt)
-                            if extra_pnginfo is not None:
-                                audio_file["description"] = json.dumps(extra_pnginfo)
-                            
-                            audio_file.save()
+                        if format in ["mp3", "flac", "ogg", "wav"]:
+                            # Vorbis Comments (FLAC, OGG)
+                            if format in ["flac", "ogg"]:
+                                from mutagen.flac import FLAC
+                                from mutagen.oggvorbis import OggVorbis
+                                
+                                if format == "flac":
+                                    audio_file = FLAC(tmp_path)
+                                else:  # ogg
+                                    audio_file = OggVorbis(tmp_path)
+
+                                if prompt is not None:
+                                    audio_file["COMMENT"] = json.dumps(prompt)
+                                if extra_pnginfo is not None:
+                                    audio_file["DESCRIPTION"] = json.dumps(extra_pnginfo)
+                                audio_file.save()
+
+                            # ID3 Tags (MP3, WAV)
+                            elif format in ["mp3", "wav"]:
+                                from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+                                from mutagen.wave import WAVE
+                                
+                                tags = None
+                                if format == "wav":
+                                    try:
+                                        audio_file = WAVE(tmp_path)
+                                        try:
+                                            audio_file.add_tags()
+                                        except Exception:
+                                            pass # Tags might already exist
+                                        tags = audio_file
+                                    except Exception:
+                                        pass
+                                else: # mp3
+                                    try:
+                                        tags = ID3(tmp_path)
+                                    except ID3NoHeaderError:
+                                        tags = ID3()
+                                
+                                if tags is not None:
+                                    if prompt is not None:
+                                        tags.add(TXXX(encoding=3, desc='prompt', text=json.dumps(prompt)))
+                                    if extra_pnginfo is not None:
+                                        tags.add(TXXX(encoding=3, desc='workflow', text=json.dumps(extra_pnginfo)))
+                                    tags.save(tmp_path)
                     except ImportError:
                         pass  # mutagen not installed, skip metadata
                     except Exception:
@@ -755,7 +805,8 @@ class AttomeS3SaveVideo:
                 "save_metadata": ("BOOLEAN", {
                     "default": True,
                 }),
-            }
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING",)
