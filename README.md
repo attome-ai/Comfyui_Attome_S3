@@ -9,6 +9,8 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 ## Features
 
 - **S3 Configuration Node** - Centralized AWS credentials management
+- **Environment Configuration** - Load default S3 credentials from `env.txt` file
+- **Smart S3 Key Handling** - Automatically skips S3 operations when s3_key is empty
 - **Image Operations** - Load/Save PNG, JPEG, WEBP with quality settings
 - **Video Operations** - Load/Save MP4 with frame extraction options
 - **Audio Operations** - Load/Save WAV, MP3, FLAC, OGG formats
@@ -94,6 +96,33 @@ For MinIO, DigitalOcean Spaces, Backblaze B2, or other S3-compatible services, s
 | DigitalOcean Spaces | `https://nyc3.digitaloceanspaces.com` |
 | Backblaze B2 | `https://s3.us-west-000.backblazeb2.com` |
 | Cloudflare R2 | `https://<account_id>.r2.cloudflarestorage.com` |
+
+
+### Using env.txt for Default Configuration
+
+You can use the `env.txt` file in the plugin directory to set default values for the S3 Config node. This is useful for avoiding repeated credential entry.
+
+1. Edit `env.txt` in the plugin directory with your credentials:
+
+```
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
+REGION_NAME=us-east-1
+BUCKET_NAME=your_bucket_name_here
+ENDPOINT_URL=
+```
+
+2. Restart ComfyUI - the S3 Config node will now use these as default values
+
+**Security Note:** The `env.txt` file should NOT be committed to version control. It's included in `.gitignore` by default.
+
+### Empty S3 Key Behavior
+
+All load nodes (Load Image, Load Text, Load Audio, Load Video) now intelligently handle empty `s3_key` values:
+
+- If `s3_key` is empty or contains only whitespace, the node skips the S3 download
+- Returns appropriate empty/default values (empty string for text, 1x1 black image, empty audio, etc.)
+- This allows for optional S3 resources in your workflows without errors
 
 
 ## Troubleshooting

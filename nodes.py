@@ -14,6 +14,52 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 
 # ============================================================================
+# ENVIRONMENT CONFIGURATION
+# ============================================================================
+
+def load_env_config():
+    """Load default S3 configuration from env.txt file."""
+    env_path = os.path.join(os.path.dirname(__file__), "env.txt")
+    config = {
+        "aws_access_key_id": "",
+        "aws_secret_access_key": "",
+        "region_name": "us-east-1",
+        "bucket_name": "",
+        "endpoint_url": "",
+    }
+    
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith("#"):
+                        continue
+                    
+                    # Parse KEY=VALUE format
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        if key == "AWS_ACCESS_KEY_ID":
+                            config["aws_access_key_id"] = value
+                        elif key == "AWS_SECRET_ACCESS_KEY":
+                            config["aws_secret_access_key"] = value
+                        elif key == "REGION_NAME":
+                            config["region_name"] = value
+                        elif key == "BUCKET_NAME":
+                            config["bucket_name"] = value
+                        elif key == "ENDPOINT_URL":
+                            config["endpoint_url"] = value
+        except Exception as e:
+            print(f"Warning: Failed to load env.txt: {e}")
+    
+    return config
+
+
+# ============================================================================
 # S3 CONFIG NODE
 # ============================================================================
 
@@ -28,28 +74,31 @@ class AttomeS3Config:
 
     @classmethod
     def INPUT_TYPES(cls):
+        # Load defaults from env.txt if available
+        env_defaults = load_env_config()
+        
         return {
             "required": {
                 "aws_access_key_id": ("STRING", {
-                    "default": "",
+                    "default": env_defaults["aws_access_key_id"],
                     "multiline": False,
                 }),
                 "aws_secret_access_key": ("STRING", {
-                    "default": "",
+                    "default": env_defaults["aws_secret_access_key"],
                     "multiline": False,
                 }),
                 "region_name": ("STRING", {
-                    "default": "us-east-1",
+                    "default": env_defaults["region_name"],
                     "multiline": False,
                 }),
                 "bucket_name": ("STRING", {
-                    "default": "",
+                    "default": env_defaults["bucket_name"],
                     "multiline": False,
                 }),
             },
             "optional": {
                 "endpoint_url": ("STRING", {
-                    "default": "",
+                    "default": env_defaults["endpoint_url"],
                     "multiline": False,
                 }),
             }
@@ -87,6 +136,11 @@ def get_s3_client(s3_config):
         client_kwargs["endpoint_url"] = s3_config["endpoint_url"]
 
     return boto3.client("s3", **client_kwargs)
+
+
+def validate_s3_key(s3_key):
+    """Check if s3_key is valid (not empty or whitespace)."""
+    return s3_key and s3_key.strip() != ""
 
 
 def download_from_s3(s3_config, s3_key):
@@ -148,6 +202,10 @@ class AttomeS3LoadText:
     CATEGORY = "Attome/S3"
 
     def load_text(self, s3_config, s3_key, encoding="utf-8"):
+        # Skip S3 loading if s3_key is empty
+        if not validate_s3_key(s3_key):
+            return ("",)
+        
         data = download_from_s3(s3_config, s3_key)
         text = data.decode(encoding)
         return (text,)
@@ -222,6 +280,13 @@ class AttomeS3LoadImage:
     CATEGORY = "Attome/S3"
 
     def load_image(self, s3_config, s3_key):
+        # Skip S3 loading if s3_key is empty - return empty image
+        if not validate_s3_key(s3_key):
+            # Return a 1x1 black image and mask
+            empty_image = torch.zeros((1, 1, 1, 3), dtype=torch.float32)
+            empty_mask = torch.zeros((1, 1, 1), dtype=torch.float32)
+            return (empty_image, empty_mask)
+        
         data = download_from_s3(s3_config, s3_key)
 
         # Load image using PIL
@@ -348,6 +413,16 @@ class AttomeS3LoadAudio:
     CATEGORY = "Attome/S3"
 
     def load_audio(self, s3_config, s3_key):
+        # Skip S3 loading if s3_key is empty - return empty audio
+        if not validate_s3_key(s3_key):
+            try:
+                import torchaudio
+                # Return empty waveform (1 channel, 1 sample)
+                empty_waveform = torch.zeros((1, 1, 1), dtype=torch.float32)
+                return ({"waveform": empty_waveform, "sample_rate": 44100},)
+            except ImportError:
+                return ({"waveform": b"", "sample_rate": 44100, "raw": True},)
+        
         data = download_from_s3(s3_config, s3_key)
 
         # Create a temp file to work with audio libraries
@@ -493,6 +568,12 @@ class AttomeS3LoadVideo:
 
     def load_video(self, s3_config, s3_key, frame_start=0,
                    frame_count=0, skip_frames=0):
+        # Skip S3 loading if s3_key is empty - return empty video
+        if not validate_s3_key(s3_key):
+            # Return a single 1x1 black frame
+            empty_frames = torch.zeros((1, 1, 1, 3), dtype=torch.float32)
+            return (empty_frames, 0, 24.0)
+        
         data = download_from_s3(s3_config, s3_key)
 
         ext = os.path.splitext(s3_key)[1] or ".mp4"
