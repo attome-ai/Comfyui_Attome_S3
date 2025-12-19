@@ -50,7 +50,7 @@ pip install -r requirements.txt
 
 ```bash
 cd ComfyUI_windows_portable\ComfyUI\custom_nodes
-git clone https://github.com/YOUR_USERNAME/ComfyUI-Attome-S3.git
+git clone https://github.com/attome-ai/ComfyUI-Attome-S3.git
 cd ComfyUI-Attome-S3
 ..\..\..\python_embeded\python.exe -m pip install -r requirements.txt
 ```
