@@ -8,9 +8,10 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 
 ## Features
 
-- **S3 Configuration Node** - Centralized AWS credentials management
-- **Environment Configuration** - Load default S3 credentials from `env.txt` file
-- **Smart S3 Key Handling** - Automatically skips S3 operations when s3_key is empty
+- **Optional S3 Config** - Use `env.txt` defaults or override with config node when needed
+- **Environment Configuration** - Load default S3 credentials from `env.txt` file (cached for performance)
+- **Smart S3 Key Handling** - Returns proper empty resources (512×512 images, 1024-sample audio) when s3_key is empty
+- **Automatic File Extensions** - File extensions auto-match selected format (PNG/JPEG/WEBP, WAV/MP3, etc.)
 - **Image Operations** - Load/Save PNG, JPEG, WEBP with quality settings
 - **Video Operations** - Load/Save MP4 with frame extraction options
 - **Audio Operations** - Load/Save WAV, MP3, FLAC, OGG formats
@@ -58,6 +59,14 @@ cd Comfyui_Attome_S3
 
 ### Basic Workflow
 
+**Option 1: Use env.txt (Recommended for single environment)**
+
+1. Edit `env.txt` with your credentials (see [Using env.txt](#using-envtxt-for-default-configuration))
+2. Use any Load/Save node directly - no config node needed!
+3. Specify the S3 key (path) for your file
+
+**Option 2: Use Config Node (For multiple environments or overrides)**
+
 1. Add **Attome S3 Config** node
 2. Enter your AWS credentials:
    - `aws_access_key_id`: Your AWS access key
@@ -70,10 +79,18 @@ cd Comfyui_Attome_S3
 
 ### Example: Load Image from S3
 
+**Without Config Node (using env.txt):**
+```
+[Attome S3 Load Image] --> [Your Workflow]
+         |
+         +-- s3_key: "images/input.png"
+```
+
+**With Config Node:**
 ```
 [Attome S3 Config] --> [Attome S3 Load Image] --> [Your Workflow]
-                            |
-                            +-- s3_key: "images/input.png"
+                             |
+                             +-- s3_key: "images/input.png"
 ```
 
 ### Example: Save Generated Image to S3
@@ -112,17 +129,39 @@ BUCKET_NAME=your_bucket_name_here
 ENDPOINT_URL=
 ```
 
-2. Restart ComfyUI - the S3 Config node will now use these as default values
+2. Restart ComfyUI - all S3 nodes will now use these as defaults automatically (no config node required!)
+
+**Benefits:**
+- ✅ No need to wire config nodes in every workflow
+- ✅ Cached in memory - only reads file once per session
+- ✅ Can still override with config node when needed
 
 **Security Note:** The `env.txt` file should NOT be committed to version control. It's included in `.gitignore` by default.
 
 ### Empty S3 Key Behavior
 
-All load nodes (Load Image, Load Text, Load Audio, Load Video) now intelligently handle empty `s3_key` values:
+All load nodes intelligently handle empty `s3_key` values:
 
-- If `s3_key` is empty or contains only whitespace, the node skips the S3 download
-- Returns appropriate empty/default values (empty string for text, 1x1 black image, empty audio, etc.)
-- This allows for optional S3 resources in your workflows without errors
+- **Empty Image**: Returns 512×512 black image (prevents division errors in nodes like IPAdapter)
+- **Empty Video**: Returns single 512×512 black frame
+- **Empty Audio**: Returns 1024-sample silent audio
+- **Empty Text**: Returns empty string
+
+This allows optional S3 resources in workflows without errors.
+
+### Automatic File Extension Matching
+
+Save nodes automatically adjust file extensions to match your format selection:
+
+```
+Path: "output"  + Format: WEBP  = Saved as: "output.webp"
+Path: "output.png"  + Format: JPEG  = Saved as: "output.jpg"
+```
+
+**Supported Formats:**
+- Images: PNG, JPEG (.jpg), WEBP
+- Audio: WAV, MP3, FLAC, OGG
+- Video: MP4 (always)
 
 
 ## Troubleshooting

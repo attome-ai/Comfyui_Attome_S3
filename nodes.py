@@ -59,6 +59,17 @@ def load_env_config():
     return config
 
 
+# Cache for default config to avoid re-reading env.txt
+_default_config_cache = None
+
+def get_default_config():
+    """Get cached default S3 configuration from env.txt."""
+    global _default_config_cache
+    if _default_config_cache is None:
+        _default_config_cache = load_env_config()
+    return _default_config_cache
+
+
 # ============================================================================
 # S3 CONFIG NODE
 # ============================================================================
@@ -125,8 +136,11 @@ class AttomeS3Config:
 # HELPER FUNCTIONS
 # ============================================================================
 
-def get_s3_client(s3_config):
-    """Create and return an S3 client from config."""
+def get_s3_client(s3_config=None):
+    """Create and return an S3 client from config. Uses env.txt defaults if config is None."""
+    if s3_config is None:
+        s3_config = get_default_config()
+    
     client_kwargs = {
         "aws_access_key_id": s3_config["aws_access_key_id"],
         "aws_secret_access_key": s3_config["aws_secret_access_key"],
@@ -145,6 +159,9 @@ def validate_s3_key(s3_key):
 
 def download_from_s3(s3_config, s3_key):
     """Download a file from S3 and return its bytes."""
+    if s3_config is None:
+        s3_config = get_default_config()
+    
     client = get_s3_client(s3_config)
     bucket = s3_config["bucket_name"]
 
@@ -154,6 +171,9 @@ def download_from_s3(s3_config, s3_key):
 
 def upload_to_s3(s3_config, s3_key, data, content_type=None):
     """Upload data to S3."""
+    if s3_config is None:
+        s3_config = get_default_config()
+    
     client = get_s3_client(s3_config)
     bucket = s3_config["bucket_name"]
 
@@ -182,13 +202,13 @@ class AttomeS3LoadText:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "s3_key": ("STRING", {
                     "default": "path/to/file.txt",
                     "multiline": False,
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "encoding": ("STRING", {
                     "default": "utf-8",
                     "multiline": False,
@@ -221,7 +241,6 @@ class AttomeS3SaveText:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "text": ("STRING", {
                     "default": "",
                     "multiline": True,
@@ -233,6 +252,7 @@ class AttomeS3SaveText:
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "encoding": ("STRING", {
                     "default": "utf-8",
                     "multiline": False,
@@ -246,7 +266,7 @@ class AttomeS3SaveText:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_text(self, s3_config, text, s3_key, encoding="utf-8"):
+    def save_text(self, text, s3_key, s3_config=None, encoding="utf-8"):
         data = text.encode(encoding)
         uri = upload_to_s3(s3_config, s3_key, data, content_type="text/plain")
         return (uri,)
@@ -266,11 +286,13 @@ class AttomeS3LoadImage:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "s3_key": ("STRING", {
                     "default": "path/to/image.png",
                     "multiline": False,
                 }),
+            },
+            "optional": {
+                "s3_config": ("S3_CONFIG",),
             },
         }
 
@@ -279,7 +301,7 @@ class AttomeS3LoadImage:
     FUNCTION = "load_image"
     CATEGORY = "Attome/S3"
 
-    def load_image(self, s3_config, s3_key):
+    def load_image(self, s3_key, s3_config=None):
         # Skip S3 loading if s3_key is empty - return empty image
         if not validate_s3_key(s3_key):
             # Return a 512x512 black image and mask (proper size to avoid division errors)
@@ -329,7 +351,6 @@ class AttomeS3SaveImage:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "image": ("IMAGE",),
                 "s3_key": ("STRING", {
                     "default": "path/to/output.png",
@@ -337,6 +358,7 @@ class AttomeS3SaveImage:
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "format": (["PNG", "JPEG", "WEBP"], {
                     "default": "PNG",
                 }),
@@ -355,7 +377,7 @@ class AttomeS3SaveImage:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_image(self, s3_config, image, s3_key, format="PNG", quality=95):
+    def save_image(self, image, s3_key, s3_config=None, format="PNG", quality=95):
         # Automatically adjust file extension to match format
         base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
         format_extensions = {
@@ -408,11 +430,13 @@ class AttomeS3LoadAudio:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "s3_key": ("STRING", {
                     "default": "path/to/audio.wav",
                     "multiline": False,
                 }),
+            },
+            "optional": {
+                "s3_config": ("S3_CONFIG",),
             },
         }
 
@@ -421,7 +445,7 @@ class AttomeS3LoadAudio:
     FUNCTION = "load_audio"
     CATEGORY = "Attome/S3"
 
-    def load_audio(self, s3_config, s3_key):
+    def load_audio(self, s3_key, s3_config=None):
         # Skip S3 loading if s3_key is empty - return empty audio
         if not validate_s3_key(s3_key):
             try:
@@ -472,7 +496,6 @@ class AttomeS3SaveAudio:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "audio": ("AUDIO",),
                 "s3_key": ("STRING", {
                     "default": "path/to/output.wav",
@@ -480,6 +503,7 @@ class AttomeS3SaveAudio:
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "format": (["wav", "mp3", "flac", "ogg"], {
                     "default": "wav",
                 }),
@@ -492,7 +516,7 @@ class AttomeS3SaveAudio:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_audio(self, s3_config, audio, s3_key, format="wav"):
+    def save_audio(self, audio, s3_key, s3_config=None, format="wav"):
         # Automatically adjust file extension to match format
         base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
         s3_key = base_key + f".{format}"
@@ -548,13 +572,13 @@ class AttomeS3LoadVideo:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "s3_key": ("STRING", {
                     "default": "path/to/video.mp4",
                     "multiline": False,
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "frame_start": ("INT", {
                     "default": 0,
                     "min": 0,
@@ -579,7 +603,7 @@ class AttomeS3LoadVideo:
     FUNCTION = "load_video"
     CATEGORY = "Attome/S3"
 
-    def load_video(self, s3_config, s3_key, frame_start=0,
+    def load_video(self, s3_key, s3_config=None, frame_start=0,
                    frame_count=0, skip_frames=0):
         # Skip S3 loading if s3_key is empty - return empty video
         if not validate_s3_key(s3_key):
@@ -650,7 +674,6 @@ class AttomeS3SaveVideo:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "s3_config": ("S3_CONFIG",),
                 "frames": ("IMAGE",),
                 "s3_key": ("STRING", {
                     "default": "path/to/output.mp4",
@@ -658,6 +681,7 @@ class AttomeS3SaveVideo:
                 }),
             },
             "optional": {
+                "s3_config": ("S3_CONFIG",),
                 "fps": ("FLOAT", {
                     "default": 24.0,
                     "min": 1.0,
@@ -676,7 +700,7 @@ class AttomeS3SaveVideo:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_video(self, s3_config, frames, s3_key, fps=24.0, codec="mp4v"):
+    def save_video(self, frames, s3_key, s3_config=None, fps=24.0, codec="mp4v"):
         import cv2
 
         # Automatically adjust file extension to .mp4
