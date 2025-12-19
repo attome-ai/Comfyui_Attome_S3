@@ -257,6 +257,9 @@ class AttomeS3SaveText:
                     "default": "utf-8",
                     "multiline": False,
                 }),
+                "save_metadata": ("BOOLEAN", {
+                    "default": True,
+                }),
             }
         }
 
@@ -266,7 +269,18 @@ class AttomeS3SaveText:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_text(self, text, s3_key, s3_config=None, encoding="utf-8"):
+    def save_text(self, text, s3_key, s3_config=None, encoding="utf-8", save_metadata=True, prompt=None, extra_pnginfo=None):
+        # Add workflow metadata as comment header if enabled
+        if save_metadata and (prompt is not None or extra_pnginfo is not None):
+            import json
+            metadata_lines = ["# ComfyUI Workflow Metadata"]
+            if prompt is not None:
+                metadata_lines.append(f"# Prompt: {json.dumps(prompt)}")
+            if extra_pnginfo is not None:
+                metadata_lines.append(f"# Extra Info: {json.dumps(extra_pnginfo)}")
+            metadata_lines.append("# --- Content ---\n")
+            text = "\n".join(metadata_lines) + "\n" + text
+        
         data = text.encode(encoding)
         uri = upload_to_s3(s3_config, s3_key, data, content_type="text/plain")
         return (uri,)
@@ -368,6 +382,9 @@ class AttomeS3SaveImage:
                     "max": 100,
                     "step": 1,
                 }),
+                "save_metadata": ("BOOLEAN", {
+                    "default": True,
+                }),
             }
         }
 
@@ -377,7 +394,7 @@ class AttomeS3SaveImage:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_image(self, image, s3_key, s3_config=None, format="PNG", quality=95):
+    def save_image(self, image, s3_key, s3_config=None, format="PNG", quality=95, save_metadata=True, prompt=None, extra_pnginfo=None):
         # Automatically adjust file extension to match format
         base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
         format_extensions = {
@@ -398,6 +415,20 @@ class AttomeS3SaveImage:
         buffer = io.BytesIO()
         save_kwargs = {}
 
+        # Handle metadata for PNG format
+        if format == "PNG" and save_metadata:
+            from PIL import PngImagePlugin
+            metadata = PngImagePlugin.PngInfo()
+            
+            # Add ComfyUI workflow metadata if available
+            if prompt is not None:
+                metadata.add_text("prompt", str(prompt))
+            if extra_pnginfo is not None:
+                for key, value in extra_pnginfo.items():
+                    metadata.add_text(key, str(value))
+            
+            save_kwargs["pnginfo"] = metadata
+        
         if format == "JPEG":
             img = img.convert("RGB")  # JPEG doesn't support alpha
             save_kwargs["quality"] = quality
@@ -507,6 +538,9 @@ class AttomeS3SaveAudio:
                 "format": (["wav", "mp3", "flac", "ogg"], {
                     "default": "wav",
                 }),
+                "save_metadata": ("BOOLEAN", {
+                    "default": True,
+                }),
             }
         }
 
@@ -516,7 +550,7 @@ class AttomeS3SaveAudio:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_audio(self, audio, s3_key, s3_config=None, format="wav"):
+    def save_audio(self, audio, s3_key, s3_config=None, format="wav", save_metadata=True, prompt=None, extra_pnginfo=None):
         # Automatically adjust file extension to match format
         base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
         s3_key = base_key + f".{format}"
@@ -547,7 +581,34 @@ class AttomeS3SaveAudio:
                 tmp_path = tmp.name
 
             try:
+                # Save audio file
                 torchaudio.save(tmp_path, waveform, sample_rate, format=format)
+                
+                # Add metadata if enabled (FLAC and MP3 support tags)
+                if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                    try:
+                        import json
+                        if format in ["mp3", "flac"]:
+                            from mutagen.easyid3 import EasyID3
+                            from mutagen.mp3 import MP3
+                            from mutagen.flac import FLAC
+                            
+                            if format == "mp3":
+                                audio_file = MP3(tmp_path, ID3=EasyID3)
+                            else:
+                                audio_file = FLAC(tmp_path)
+                            
+                            if prompt is not None:
+                                audio_file["comment"] = json.dumps(prompt)
+                            if extra_pnginfo is not None:
+                                audio_file["description"] = json.dumps(extra_pnginfo)
+                            
+                            audio_file.save()
+                    except ImportError:
+                        pass  # mutagen not installed, skip metadata
+                    except Exception:
+                        pass  # Failed to add metadata, continue anyway
+                
                 with open(tmp_path, "rb") as f:
                     data = f.read()
             finally:
@@ -691,6 +752,9 @@ class AttomeS3SaveVideo:
                 "codec": (["mp4v", "avc1", "XVID"], {
                     "default": "mp4v",
                 }),
+                "save_metadata": ("BOOLEAN", {
+                    "default": True,
+                }),
             }
         }
 
@@ -700,7 +764,7 @@ class AttomeS3SaveVideo:
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
 
-    def save_video(self, frames, s3_key, s3_config=None, fps=24.0, codec="mp4v"):
+    def save_video(self, frames, s3_key, s3_config=None, fps=24.0, codec="mp4v", save_metadata=True, prompt=None, extra_pnginfo=None):
         import cv2
 
         # Automatically adjust file extension to .mp4
@@ -729,6 +793,23 @@ class AttomeS3SaveVideo:
                 out.write(frame_bgr)
 
             out.release()
+            
+            # Add metadata to MP4 if enabled
+            if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                try:
+                    import json
+                    from mutagen.mp4 import MP4
+                    
+                    video_file = MP4(tmp_path)
+                    if prompt is not None:
+                        video_file["\xa9cmt"] = json.dumps(prompt)
+                    if extra_pnginfo is not None:
+                        video_file["desc"] = json.dumps(extra_pnginfo)
+                    video_file.save()
+                except ImportError:
+                    pass  # mutagen not installed, skip metadata
+                except Exception:
+                    pass  # Failed to add metadata, continue anyway
 
             with open(tmp_path, "rb") as f:
                 data = f.read()

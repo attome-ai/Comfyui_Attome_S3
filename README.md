@@ -12,6 +12,7 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 - **Environment Configuration** - Load default S3 credentials from `env.txt` file (cached for performance)
 - **Smart S3 Key Handling** - Returns proper empty resources (512×512 images, 1024-sample audio) when s3_key is empty
 - **Automatic File Extensions** - File extensions auto-match selected format (PNG/JPEG/WEBP, WAV/MP3, etc.)
+- **Metadata Control** - Optional workflow metadata embedding in images (enabled by default for debugging, disable for production)
 - **Image Operations** - Load/Save PNG, JPEG, WEBP with quality settings
 - **Video Operations** - Load/Save MP4 with frame extraction options
 - **Audio Operations** - Load/Save WAV, MP3, FLAC, OGG formats
@@ -101,6 +102,43 @@ cd Comfyui_Attome_S3
                             +-- s3_key: "outputs/result.png"
                             +-- format: "PNG"
                             +-- quality: 95
+                            +-- save_metadata: true (or false)
+```
+
+### Workflow Metadata Control
+
+The **save_metadata** parameter controls whether ComfyUI workflow information is embedded in saved files:
+
+**✅ `save_metadata: true` (Default)**
+- Embeds complete workflow data (nodes, connections, parameters) in file metadata
+- Allows recovery of the exact workflow that generated the file
+- **Perfect for debugging and testing workflows**
+- Slightly larger file size due to embedded JSON
+
+**❌ `save_metadata: false`**
+- Saves clean files without any workflow information
+- Smaller file sizes
+- No exposed workflow data when sharing publicly
+- **Perfect for production outputs**
+
+**Format-Specific Implementation:**
+
+| Format | Metadata Storage Method | Notes |
+|--------|------------------------|-------|
+| **PNG Images** | PNG text chunks (`pnginfo`) | Standard method, works with all PNG viewers |
+| **MP4 Videos** | MP4 metadata tags (`©cmt`, `desc`) | Requires `mutagen` library (optional) |
+| **MP3/FLAC Audio** | ID3/Vorbis comment tags | Requires `mutagen` library (optional) |
+| **Text Files** | Comment header (`# ComfyUI Workflow...`) | Prepended as comments at file start |
+| **JPEG/WEBP/WAV/OGG** | Not supported | Metadata will be silently skipped |
+
+**Use Cases:**
+- **Development/Testing**: Keep `save_metadata: true` to easily recover and debug workflows
+- **Production/Sharing**: Set `save_metadata: false` for clean, compact files
+- **Public APIs**: Disable to prevent exposing your workflow logic
+
+**Optional Dependency:**
+```bash
+pip install mutagen  # For video/audio metadata support
 ```
 
 ### Using with S3-Compatible Services
