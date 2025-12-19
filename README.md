@@ -13,7 +13,7 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 - **Video Operations** - Load/Save MP4 with frame extraction options
 - **Audio Operations** - Load/Save WAV, MP3, FLAC, OGG formats
 - **Text Operations** - Load/Save text files with encoding support
-- **S3-Compatible** - Works with AWS S3, MinIO, DigitalOcean Spaces, Backblaze B2, etc.
+- **S3-Compatible** - Works with AWS S3, Rustfs, MinIO, DigitalOcean Spaces, Backblaze B2, etc.
 
 ## Nodes
 
