@@ -31,22 +31,8 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 
 ## Installation
 
-### Method 1: ComfyUI Manager (Recommended)
 
-1. Open ComfyUI Manager
-2. Search for "Attome S3"
-3. Click Install
-
-### Method 2: Manual Installation
-
-```bash
-cd ComfyUI/custom_nodes
-git clone https://github.com/attome-ai/Comfyui_Attome_S3.git
-cd Comfyui_Attome_S3
-pip install -r requirements.txt
-```
-
-### Method 3: Portable ComfyUI (Windows)
+### Method 1: Portable ComfyUI (Windows)
 
 ```bash
 cd ComfyUI_windows_portable\ComfyUI\custom_nodes
