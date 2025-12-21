@@ -169,6 +169,42 @@ def download_from_s3(s3_config, s3_key):
     return response["Body"].read()
 
 
+def parse_dynamic_key(s3_key, index=0, total=1):
+    """Replace placeholders in s3_key with dynamic values."""
+    import datetime
+    import random
+    import string
+
+    now = datetime.datetime.now()
+    
+    # Basic time/date placeholders
+    replacements = {
+        "%year%": now.strftime("%Y"),
+        "%month%": now.strftime("%m"),
+        "%day%": now.strftime("%d"),
+        "%hour%": now.strftime("%H"),
+        "%minute%": now.strftime("%M"),
+        "%second%": now.strftime("%S"),
+        "%date%": now.strftime("%Y%m%d"),
+        "%time%": now.strftime("%H%M%S"),
+        "%random%": ''.join(random.choices(string.ascii_lowercase + string.digits, k=4)),
+        "%index%": f"{index + 1:04d}",
+        "%count%": str(index + 1),
+        "%total%": str(total),
+    }
+
+    result = s3_key
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, value)
+    
+    # Always append index suffix if no placeholder is used
+    if "%index%" not in s3_key and "%count%" not in s3_key:
+        base, ext = os.path.splitext(result)
+        result = f"{base}_{index + 1}{ext}"
+    
+    return result
+
+
 def upload_to_s3(s3_config, s3_key, data, content_type=None):
     """Upload data to S3."""
     if s3_config is None:
@@ -241,11 +277,7 @@ class AttomeS3SaveText:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": ("STRING", {
-                    "default": "",
-                    "multiline": True,
-                    "forceInput": True,
-                }),
+                "text": ("STRING", {"forceInput": True}),
                 "s3_key": ("STRING", {
                     "default": "path/to/output.txt",
                     "multiline": False,
@@ -265,26 +297,56 @@ class AttomeS3SaveText:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("s3_uri",)
+    RETURN_NAMES = ("s3_uris",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "save_text"
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
+    INPUT_IS_LIST = True
 
     def save_text(self, text, s3_key, s3_config=None, encoding="utf-8", save_metadata=True, prompt=None, extra_pnginfo=None):
-        # Add workflow metadata as comment header if enabled
-        if save_metadata and (prompt is not None or extra_pnginfo is not None):
-            import json
-            metadata_lines = ["# ComfyUI Workflow Metadata"]
-            if prompt is not None:
-                metadata_lines.append(f"# Prompt: {json.dumps(prompt)}")
-            if extra_pnginfo is not None:
-                metadata_lines.append(f"# Extra Info: {json.dumps(extra_pnginfo)}")
-            metadata_lines.append("# --- Content ---\n")
-            text = "\n".join(metadata_lines) + "\n" + text
-        
-        data = text.encode(encoding)
-        uri = upload_to_s3(s3_config, s3_key, data, content_type="text/plain")
-        return (uri,)
+        # When INPUT_IS_LIST is True, all arguments are passed as lists
+        s3_key = s3_key[0]
+        s3_config = s3_config[0] if s3_config else None
+        encoding = encoding[0] if encoding else "utf-8"
+        save_metadata = save_metadata[0] if save_metadata else True
+        prompt = prompt[0] if prompt else None
+        extra_pnginfo = extra_pnginfo[0] if extra_pnginfo else None
+
+        if not text:
+            return ([],)
+
+        print(f"AttomeS3SaveText: Processing {len(text)} text items")
+        uris = []
+        base_key, ext = os.path.splitext(s3_key)
+        if not ext:
+            ext = ".txt"
+
+        for i, current_text in enumerate(text):
+            # Prepare metadata if enabled
+            # ... (metadata logic remains same)
+            final_text = current_text
+            if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                import json
+                metadata_lines = ["# ComfyUI Workflow Metadata"]
+                if prompt is not None:
+                    metadata_lines.append(f"# Prompt: {json.dumps(prompt)}")
+                if extra_pnginfo is not None:
+                    metadata_lines.append(f"# Extra Info: {json.dumps(extra_pnginfo)}")
+                metadata_lines.append("# --- Content ---\n")
+                final_text = "\n".join(metadata_lines) + "\n" + final_text
+            
+            data = final_text.encode(encoding)
+            
+            # Use dynamic key
+            current_key = parse_dynamic_key(s3_key, i, len(text))
+            if not current_key.lower().endswith(ext.lower()):
+                current_key += ext
+            
+            uri = upload_to_s3(s3_config, current_key, data, content_type="text/plain")
+            uris.append(uri)
+            
+        return (uris,)
 
 
 # ============================================================================
@@ -391,80 +453,101 @@ class AttomeS3SaveImage:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("s3_uri",)
+    RETURN_NAMES = ("s3_uris",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "save_image"
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
+    INPUT_IS_LIST = True
 
     def save_image(self, image, s3_key, s3_config=None, format="PNG", quality=95, save_metadata=True, prompt=None, extra_pnginfo=None):
+        # When INPUT_IS_LIST is True, all arguments are passed as lists
+        s3_key = s3_key[0]
+        s3_config = s3_config[0] if s3_config else None
+        format = format[0] if format else "PNG"
+        quality = quality[0] if quality else 95
+        save_metadata = save_metadata[0] if save_metadata else True
+        prompt = prompt[0] if prompt else None
+        extra_pnginfo = extra_pnginfo[0] if extra_pnginfo else None
+
+        # Collect all images from all entries in the image list
+        final_images = []
+        for img_batch in image:
+            if img_batch is not None:
+                # img_batch is BHWC tensor
+                for j in range(img_batch.shape[0]):
+                    final_images.append(img_batch[j])
+        
+        if not final_images:
+            return ([],)
+
+        print(f"AttomeS3SaveImage: Processing {len(final_images)} images")
+
         # Automatically adjust file extension to match format
-        base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
+        base_key, _ = os.path.splitext(s3_key)
         format_extensions = {
             "PNG": ".png",
             "JPEG": ".jpg",
             "WEBP": ".webp"
         }
-        s3_key = base_key + format_extensions.get(format, ".png")
+        ext = format_extensions.get(format, ".png")
         
-        # Convert from ComfyUI tensor format (BHWC) to PIL
-        # Take first image in batch
-        img_np = image[0].cpu().numpy()
-        img_np = (img_np * 255).clip(0, 255).astype(np.uint8)
+        uris = []
+        for i, image_tensor in enumerate(final_images):
+            # ... (conversion logic remains same)
+            # Convert from ComfyUI tensor format (HWC) to PIL
+            img_np = image_tensor.cpu().numpy()
+            img_np = (img_np * 255).clip(0, 255).astype(np.uint8)
+            img = Image.fromarray(img_np)
 
-        img = Image.fromarray(img_np)
+            # Save to bytes buffer
+            buffer = io.BytesIO()
+            save_kwargs = {}
 
-        # Save to bytes buffer
-        buffer = io.BytesIO()
-        save_kwargs = {}
-
-        # Handle metadata for PNG and WEBP formats
-        if save_metadata and (prompt is not None or extra_pnginfo is not None):
-            import json
+            # Handle metadata
+            if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                import json
+                if format == "PNG":
+                    from PIL import PngImagePlugin
+                    metadata = PngImagePlugin.PngInfo()
+                    if prompt is not None:
+                        metadata.add_text("prompt", json.dumps(prompt))
+                    if extra_pnginfo is not None:
+                        for key, value in extra_pnginfo.items():
+                            metadata.add_text(key, json.dumps(value))
+                    save_kwargs["pnginfo"] = metadata
+                elif format in ["WEBP", "JPEG"]:
+                    metadata = img.getexif()
+                    if prompt is not None:
+                        metadata[0x0110] = "prompt:{}".format(json.dumps(prompt))
+                    if extra_pnginfo is not None:
+                        initial_exif = 0x010f
+                        for x in extra_pnginfo:
+                            metadata[initial_exif] = "{}:{}".format(x, json.dumps(extra_pnginfo[x]))
+                            initial_exif -= 1
+                    save_kwargs["exif"] = metadata
             
-            if format == "PNG":
-                from PIL import PngImagePlugin
-                metadata = PngImagePlugin.PngInfo()
-                
-                # Add ComfyUI workflow metadata if available
-                # ComfyUI expects JSON-encoded strings for "prompt" and "workflow" keys
-                if prompt is not None:
-                    metadata.add_text("prompt", json.dumps(prompt))
-                if extra_pnginfo is not None:
-                    for key, value in extra_pnginfo.items():
-                        metadata.add_text(key, json.dumps(value))
-                
-                save_kwargs["pnginfo"] = metadata
-            
-            elif format in ["WEBP", "JPEG"]:
-                # WEBP/JPEG uses EXIF for metadata (matching ComfyUI's implementation)
-                # Format: EXIF tag with "key:json_value" format
-                metadata = img.getexif()
-                if prompt is not None:
-                    metadata[0x0110] = "prompt:{}".format(json.dumps(prompt))
-                if extra_pnginfo is not None:
-                    initial_exif = 0x010f
-                    for x in extra_pnginfo:
-                        metadata[initial_exif] = "{}:{}".format(x, json.dumps(extra_pnginfo[x]))
-                        initial_exif -= 1
-                
-                save_kwargs["exif"] = metadata
-        
-        if format == "JPEG":
-            img = img.convert("RGB")  # JPEG doesn't support alpha
-            save_kwargs["quality"] = quality
-            content_type = "image/jpeg"
-        elif format == "WEBP":
-            save_kwargs["quality"] = quality
-            content_type = "image/webp"
-        else:  # PNG
             content_type = "image/png"
+            if format == "JPEG":
+                img = img.convert("RGB")
+                save_kwargs["quality"] = quality
+                content_type = "image/jpeg"
+            elif format == "WEBP":
+                save_kwargs["quality"] = quality
+                content_type = "image/webp"
 
-        img.save(buffer, format=format, **save_kwargs)
-        buffer.seek(0)
+            img.save(buffer, format=format, **save_kwargs)
+            buffer.seek(0)
 
-        uri = upload_to_s3(s3_config, s3_key, buffer.read(),
-                          content_type=content_type)
-        return (uri,)
+            # Use dynamic key
+            current_key = parse_dynamic_key(s3_key, i, len(final_images))
+            current_key_base, _ = os.path.splitext(current_key)
+            current_key = f"{current_key_base}{ext}"
+            
+            uri = upload_to_s3(s3_config, current_key, buffer.read(), content_type=content_type)
+            uris.append(uri)
+            
+        return (uris,)
 
 
 # ============================================================================
@@ -566,15 +649,30 @@ class AttomeS3SaveAudio:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("s3_uri",)
+    RETURN_NAMES = ("s3_uris",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "save_audio"
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
+    INPUT_IS_LIST = True
 
     def save_audio(self, audio, s3_key, s3_config=None, format="wav", save_metadata=True, prompt=None, extra_pnginfo=None):
+        # When INPUT_IS_LIST is True, all arguments are passed as lists
+        s3_key = s3_key[0]
+        s3_config = s3_config[0] if s3_config else None
+        format = format[0] if format else "wav"
+        save_metadata = save_metadata[0] if save_metadata else True
+        prompt = prompt[0] if prompt else None
+        extra_pnginfo = extra_pnginfo[0] if extra_pnginfo else None
+
+        if not audio:
+            return ([],)
+
+        print(f"AttomeS3SaveAudio: Processing {len(audio)} audio items")
+
         # Automatically adjust file extension to match format
-        base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
-        s3_key = base_key + f".{format}"
+        base_key, _ = os.path.splitext(s3_key)
+        ext = f".{format}"
         
         content_types = {
             "wav": "audio/wav",
@@ -582,91 +680,88 @@ class AttomeS3SaveAudio:
             "flac": "audio/flac",
             "ogg": "audio/ogg",
         }
+        content_type = content_types.get(format, "audio/wav")
 
-        # Handle raw bytes
-        if isinstance(audio, dict) and audio.get("raw"):
-            data = audio["waveform"]
-        else:
-            # Use torchaudio to save
-            import torchaudio
-
-            waveform = audio["waveform"]
-            sample_rate = audio["sample_rate"]
-
-            # Remove batch dimension if present
-            if waveform.dim() == 3:
-                waveform = waveform.squeeze(0)
-
-            with tempfile.NamedTemporaryFile(suffix=f".{format}",
-                                             delete=False) as tmp:
-                tmp_path = tmp.name
-
-            try:
-                # Save audio file
-                torchaudio.save(tmp_path, waveform, sample_rate, format=format)
+        uris = []
+        for i, current_audio in enumerate(audio):
+            # ... (audio processing logic remains same)
+            if current_audio is None:
+                continue
                 
-                # Add metadata if enabled (FLAC and MP3 support tags)
-                if save_metadata and (prompt is not None or extra_pnginfo is not None):
-                    try:
-                        import json
-                        if format in ["mp3", "flac", "ogg", "wav"]:
-                            # Vorbis Comments (FLAC, OGG)
-                            if format in ["flac", "ogg"]:
-                                from mutagen.flac import FLAC
-                                from mutagen.oggvorbis import OggVorbis
-                                
-                                if format == "flac":
-                                    audio_file = FLAC(tmp_path)
-                                else:  # ogg
-                                    audio_file = OggVorbis(tmp_path)
+            # Handle raw bytes
+            if isinstance(current_audio, dict) and current_audio.get("raw"):
+                data = current_audio["waveform"]
+            else:
+                # Use torchaudio to save
+                import torchaudio
 
-                                if prompt is not None:
-                                    audio_file["COMMENT"] = json.dumps(prompt)
-                                if extra_pnginfo is not None:
-                                    audio_file["DESCRIPTION"] = json.dumps(extra_pnginfo)
-                                audio_file.save()
+                waveform = current_audio["waveform"]
+                sample_rate = current_audio["sample_rate"]
 
-                            # ID3 Tags (MP3, WAV)
-                            elif format in ["mp3", "wav"]:
-                                from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
-                                from mutagen.wave import WAVE
-                                
-                                tags = None
-                                if format == "wav":
-                                    try:
-                                        audio_file = WAVE(tmp_path)
-                                        try:
-                                            audio_file.add_tags()
-                                        except Exception:
-                                            pass # Tags might already exist
-                                        tags = audio_file
-                                    except Exception:
-                                        pass
-                                else: # mp3
-                                    try:
-                                        tags = ID3(tmp_path)
-                                    except ID3NoHeaderError:
-                                        tags = ID3()
-                                
-                                if tags is not None:
+                # Remove batch dimension if present
+                if waveform.dim() == 3:
+                    waveform = waveform.squeeze(0)
+
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                try:
+                    # Save audio file
+                    torchaudio.save(tmp_path, waveform, sample_rate, format=format)
+                    
+                    # Add metadata if enabled
+                    if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                        try:
+                            import json
+                            if format in ["mp3", "flac", "ogg", "wav"]:
+                                if format in ["flac", "ogg"]:
+                                    from mutagen.flac import FLAC
+                                    from mutagen.oggvorbis import OggVorbis
+                                    audio_file = FLAC(tmp_path) if format == "flac" else OggVorbis(tmp_path)
                                     if prompt is not None:
-                                        tags.add(TXXX(encoding=3, desc='prompt', text=json.dumps(prompt)))
+                                        audio_file["COMMENT"] = json.dumps(prompt)
                                     if extra_pnginfo is not None:
-                                        tags.add(TXXX(encoding=3, desc='workflow', text=json.dumps(extra_pnginfo)))
-                                    tags.save(tmp_path)
-                    except ImportError:
-                        pass  # mutagen not installed, skip metadata
-                    except Exception:
-                        pass  # Failed to add metadata, continue anyway
-                
-                with open(tmp_path, "rb") as f:
-                    data = f.read()
-            finally:
-                os.unlink(tmp_path)
+                                        audio_file["DESCRIPTION"] = json.dumps(extra_pnginfo)
+                                    audio_file.save()
+                                elif format in ["mp3", "wav"]:
+                                    from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
+                                    from mutagen.wave import WAVE
+                                    tags = None
+                                    if format == "wav":
+                                        try:
+                                            audio_file = WAVE(tmp_path)
+                                            try:
+                                                audio_file.add_tags()
+                                            except Exception: pass
+                                            tags = audio_file
+                                        except Exception: pass
+                                    else: # mp3
+                                        try:
+                                            tags = ID3(tmp_path)
+                                        except ID3NoHeaderError:
+                                            tags = ID3()
+                                    if tags is not None:
+                                        if prompt is not None:
+                                            tags.add(TXXX(encoding=3, desc='prompt', text=json.dumps(prompt)))
+                                        if extra_pnginfo is not None:
+                                            tags.add(TXXX(encoding=3, desc='workflow', text=json.dumps(extra_pnginfo)))
+                                        tags.save(tmp_path)
+                        except Exception: pass
 
-        uri = upload_to_s3(s3_config, s3_key, data,
-                          content_type=content_types.get(format, "audio/wav"))
-        return (uri,)
+                    with open(tmp_path, "rb") as f:
+                        data = f.read()
+                finally:
+                    os.unlink(tmp_path)
+
+            # Use dynamic key
+            current_key = parse_dynamic_key(s3_key, i, len(audio))
+            if not current_key.lower().endswith(ext.lower()):
+                current_key += ext
+            
+            uri = upload_to_s3(s3_config, current_key, data, content_type=content_type)
+            uris.append(uri)
+            
+        return (uris,)
 
 
 # ============================================================================
@@ -810,65 +905,89 @@ class AttomeS3SaveVideo:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("s3_uri",)
+    RETURN_NAMES = ("s3_uris",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "save_video"
     CATEGORY = "Attome/S3"
     OUTPUT_NODE = True
+    INPUT_IS_LIST = True
 
     def save_video(self, frames, s3_key, s3_config=None, fps=24.0, codec="mp4v", save_metadata=True, prompt=None, extra_pnginfo=None):
         import cv2
 
+        # When INPUT_IS_LIST is True, all arguments are passed as lists
+        s3_key = s3_key[0]
+        s3_config = s3_config[0] if s3_config else None
+        fps = fps[0] if fps else 24.0
+        codec = codec[0] if codec else "mp4v"
+        save_metadata = save_metadata[0] if save_metadata else True
+        prompt = prompt[0] if prompt else None
+        extra_pnginfo = extra_pnginfo[0] if extra_pnginfo else None
+
+        if not frames:
+            return ([],)
+
+        print(f"AttomeS3SaveVideo: Processing {len(frames)} video items")
+
         # Automatically adjust file extension to .mp4
-        base_key = os.path.splitext(s3_key)[0]  # Remove existing extension
-        s3_key = base_key + ".mp4"
+        base_key, _ = os.path.splitext(s3_key)
+        ext = ".mp4"
+        
+        uris = []
+        for i, current_frames in enumerate(frames):
+            # ... (video processing logic remains same)
+            if current_frames is None:
+                continue
+                
+            # Convert tensor to numpy
+            frames_np = current_frames.cpu().numpy()
+            frames_np = (frames_np * 255).clip(0, 255).astype(np.uint8)
 
-        # Convert tensor to numpy
-        frames_np = frames.cpu().numpy()
-        frames_np = (frames_np * 255).clip(0, 255).astype(np.uint8)
+            # Get dimensions
+            num_frames, height, width, _ = frames_np.shape
 
-        # Get dimensions
-        num_frames, height, width, _ = frames_np.shape
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp_path = tmp.name
 
-        ext = os.path.splitext(s3_key)[1] or ".mp4"
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                out = cv2.VideoWriter(tmp_path, fourcc, fps, (width, height))
 
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-            tmp_path = tmp.name
+                for frame in frames_np:
+                    # Convert RGB to BGR for OpenCV
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    out.write(frame_bgr)
 
-        try:
-            fourcc = cv2.VideoWriter_fourcc(*codec)
-            out = cv2.VideoWriter(tmp_path, fourcc, fps, (width, height))
+                out.release()
+                
+                # Add metadata to MP4 if enabled
+                if save_metadata and (prompt is not None or extra_pnginfo is not None):
+                    try:
+                        import json
+                        from mutagen.mp4 import MP4
+                        
+                        video_file = MP4(tmp_path)
+                        if prompt is not None:
+                            video_file["\xa9cmt"] = json.dumps(prompt)
+                        if extra_pnginfo is not None:
+                            video_file["desc"] = json.dumps(extra_pnginfo)
+                        video_file.save()
+                    except Exception: pass
 
-            for frame in frames_np:
-                # Convert RGB to BGR for OpenCV
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(frame_bgr)
+                with open(tmp_path, "rb") as f:
+                    data = f.read()
+            finally:
+                os.unlink(tmp_path)
 
-            out.release()
+            # Use dynamic key
+            current_key = parse_dynamic_key(s3_key, i, len(frames))
+            if not current_key.lower().endswith(ext.lower()):
+                current_key += ext
             
-            # Add metadata to MP4 if enabled
-            if save_metadata and (prompt is not None or extra_pnginfo is not None):
-                try:
-                    import json
-                    from mutagen.mp4 import MP4
-                    
-                    video_file = MP4(tmp_path)
-                    if prompt is not None:
-                        video_file["\xa9cmt"] = json.dumps(prompt)
-                    if extra_pnginfo is not None:
-                        video_file["desc"] = json.dumps(extra_pnginfo)
-                    video_file.save()
-                except ImportError:
-                    pass  # mutagen not installed, skip metadata
-                except Exception:
-                    pass  # Failed to add metadata, continue anyway
-
-            with open(tmp_path, "rb") as f:
-                data = f.read()
-        finally:
-            os.unlink(tmp_path)
-
-        uri = upload_to_s3(s3_config, s3_key, data, content_type="video/mp4")
-        return (uri,)
+            uri = upload_to_s3(s3_config, current_key, data, content_type="video/mp4")
+            uris.append(uri)
+            
+        return (uris,)
 
 
 # ============================================================================

@@ -12,12 +12,16 @@ Custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that enabl
 - **Environment Configuration** - Load default S3 credentials from `env.txt` file (cached for performance)
 - **Smart S3 Key Handling** - Returns proper empty resources (512×512 images, 1024-sample audio) when s3_key is empty
 - **Automatic File Extensions** - File extensions auto-match selected format (PNG/JPEG/WEBP, WAV/MP3, etc.)
-- **Metadata Control** - Optional workflow metadata embedding in images (enabled by default for debugging, disable for production)
+- **Metadata Control** - Optional workflow metadata embedding in images
+- **Batch Saving** - Save multiple images/files at once with automatic numbering (`output_1.png`, `output_2.png`, etc.)
+- **Dynamic Filenames** - Use placeholders like `%date%`, `%time%`, `%random%` in your file paths
+- **List Output** - All save nodes return a list of S3 URIs for easy downstream processing
 - **Image Operations** - Load/Save PNG, JPEG, WEBP with quality settings
 - **Video Operations** - Load/Save MP4 with frame extraction options
 - **Audio Operations** - Load/Save WAV, MP3, FLAC, OGG formats
 - **Text Operations** - Load/Save text files with encoding support
 - **S3-Compatible** - Works with AWS S3, Rustfs, MinIO, DigitalOcean Spaces, Backblaze B2, etc.
+
 
 ## Nodes
 
