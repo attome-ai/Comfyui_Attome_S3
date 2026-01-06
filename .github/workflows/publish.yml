@@ -16,13 +16,18 @@ jobs:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'attome-ai' }}
+    
+    # 🌟 FIX 1: Link the job to the 'Attome' environment
+    environment: Attome 
+    
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         with:
           submodules: true
+          
       - name: Publish Custom Node
         uses: Comfy-Org/publish-node-action@v1
         with:
-          ## Add your own personal access token to your Github Repository secrets and reference it here.
-          personal_access_token: ${{ secrets.comfyui_s3_api_key }}
+          ## FIX 2: Ensure the secret name is correctly referenced (uppercase)
+          personal_access_token: ${{ secrets.COMFYUI_S3_API_KEY }}
