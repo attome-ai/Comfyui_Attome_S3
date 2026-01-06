@@ -18,7 +18,7 @@ license = {file = "LICENSE"}
      "Environment :: GPU :: Intel Arc",      # Intel Arc support
      "Environment :: NPU :: Huawei Ascend",  # Huawei Ascend support
      "Environment :: GPU :: Apple Metal",    # Apple Metal support
-# ]
+ ]
 
 dependencies = ["boto3>=1.26.0", "Pillow>=9.0.0", "torch>=1.12.0", "numpy>=1.21.0", "torchaudio>=0.12.0", "opencv-python>=4.5.0"]
 
