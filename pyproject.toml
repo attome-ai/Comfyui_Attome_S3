@@ -29,7 +29,7 @@ Documentation = "https://github.com/attome-ai/Comfyui_Attome_S3/wiki"
 "Bug Tracker" = "https://github.com/attome-ai/Comfyui_Attome_S3/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "attome"
 DisplayName = "Comfyui_Attome_S3"
 Icon = ""
 includes = [] 
