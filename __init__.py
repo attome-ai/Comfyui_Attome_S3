@@ -38,5 +38,5 @@ from .nodes import (
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
 
 # Version info
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "Attome"
